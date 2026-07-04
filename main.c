@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define HASH_SIZE 100003 // Número primo para reduzir colisões na Tabela Hash
-#define MAX_LINE 2048
+#define MAX_LINE 2048    // Tamanho máximo para leitura de uma linha
 #define MAX_PESQUISADORES 150000
 
 /* ============================================================================
@@ -42,14 +43,15 @@ typedef struct Aresta {
   struct Aresta *prox;
 } Aresta;
 
-// Estrutura principal que encapsula o estado do sistema
+// struct de agrupamento das estruturas usadas, serve para diminuir a
+// quantidade de argumentos passados para as funções
 typedef struct {
   HashNome *tabelaNomes[HASH_SIZE];
   HashTitulo *tabelaTitulos[HASH_SIZE];
   char *idParaNome[MAX_PESQUISADORES]; // Índice: localiza o nome a partir do nó
   Aresta *grafo[MAX_PESQUISADORES];    // Grafo: liga os pesquisadores
   int totalPesquisadores;
-} Sistema;
+} contexto;
 
 /* ============================================================================
  * FUNÇÕES AUXILIARES E DE HASH
@@ -60,6 +62,10 @@ typedef struct {
 unsigned int calcularHash(const char *str) {
   unsigned long hash = 5381;
   int c;
+
+  if (str == NULL)
+    exit(1);
+
   while ((c = *str++)) {
     hash = ((hash << 5) + hash) + c;
   }
@@ -67,20 +73,27 @@ unsigned int calcularHash(const char *str) {
 }
 
 // Remove quebras de linha do final da string
-void limparString(char *str) { str[strcspn(str, "\r\n")] = 0; }
+void trim_str(char *str) { str[strcspn(str, "\r\n")] = 0; }
 
 // Cria e inicializa o sistema
-Sistema *criarSistema() {
-  Sistema *s = (Sistema *)malloc(sizeof(Sistema));
+contexto *criar_contexto() {
+  contexto *s = (contexto *)malloc(sizeof(contexto));
+
+  if (s == NULL)
+    exit(1);
+
   s->totalPesquisadores = 0;
+
   for (int i = 0; i < HASH_SIZE; i++) {
     s->tabelaNomes[i] = NULL;
     s->tabelaTitulos[i] = NULL;
   }
+
   for (int i = 0; i < MAX_PESQUISADORES; i++) {
     s->idParaNome[i] = NULL;
     s->grafo[i] = NULL;
   }
+
   return s;
 }
 
@@ -90,7 +103,7 @@ Sistema *criarSistema() {
  */
 
 // Insere um pesquisador na Hash de Nomes (ou retorna o ID se já existir)
-int obterOuInserirPesquisador(Sistema *s, const char *nome) {
+int obterOuInserirPesquisador(contexto *s, const char *nome) {
   unsigned int indice = calcularHash(nome);
   HashNome *atual = s->tabelaNomes[indice];
 
@@ -103,15 +116,19 @@ int obterOuInserirPesquisador(Sistema *s, const char *nome) {
   }
 
   if (s->totalPesquisadores >= MAX_PESQUISADORES) {
-    printf("ERRO FALA: limite maximo de %d pesquisadores atingido!\n",
+    printf("ERRO: limite maximo de %d pesquisadores atingido!\n",
            MAX_PESQUISADORES);
-    printf("Aumente a constante MAX_PESQUISADORES no código.\n");
     exit(1);
   }
 
   // Se não existir, insere um novo
-  int novoId = s->totalPesquisadores++;
+  s->totalPesquisadores++;
+  int novoId = s->totalPesquisadores;
   HashNome *novoNo = (HashNome *)malloc(sizeof(HashNome));
+
+  if (novoNo == NULL)
+    exit(1);
+
   novoNo->nome = strdup(nome);
   novoNo->id = novoId;
   novoNo->prox = s->tabelaNomes[indice];
@@ -124,7 +141,7 @@ int obterOuInserirPesquisador(Sistema *s, const char *nome) {
 }
 
 // Insere um autor em um título na Hash de Títulos
-void inserirTitulo(Sistema *s, const char *titulo, int idAutor) {
+void inserirTitulo(contexto *s, const char *titulo, int idAutor) {
   unsigned int indice = calcularHash(titulo);
   HashTitulo *atual = s->tabelaTitulos[indice];
 
@@ -140,6 +157,10 @@ void inserirTitulo(Sistema *s, const char *titulo, int idAutor) {
       }
       // Colisão Repetida: Adiciona o novo autor à lista deste título
       ListaAutores *novoAutor = (ListaAutores *)malloc(sizeof(ListaAutores));
+
+      if (novoAutor == NULL)
+        exit(1);
+
       novoAutor->idAutor = idAutor;
       novoAutor->prox = atual->autores;
       atual->autores = novoAutor;
@@ -150,9 +171,17 @@ void inserirTitulo(Sistema *s, const char *titulo, int idAutor) {
 
   // Título não existe, cria um novo nó na tabela
   HashTitulo *novoTitulo = (HashTitulo *)malloc(sizeof(HashTitulo));
+
+  if (novoTitulo == NULL)
+    exit(1);
+
   novoTitulo->titulo = strdup(titulo);
 
   ListaAutores *novoAutor = (ListaAutores *)malloc(sizeof(ListaAutores));
+
+  if (novoAutor == NULL)
+    exit(1);
+
   novoAutor->idAutor = idAutor;
   novoAutor->prox = NULL;
 
@@ -167,7 +196,7 @@ void inserirTitulo(Sistema *s, const char *titulo, int idAutor) {
  */
 
 // Adiciona uma aresta direcionada u -> v com o título do trabalho
-void adicionarAresta(Sistema *s, int u, int v, const char *titulo) {
+void adicionarAresta(contexto *s, int u, int v, const char *titulo) {
   if (u == v)
     return; // Evita auto-loop (um autor colaborando com ele mesmo)
 
@@ -178,6 +207,10 @@ void adicionarAresta(Sistema *s, int u, int v, const char *titulo) {
     if (atual->idDestino == v) {
       // Aresta já existe. Adiciona o título à lista de colaborações da aresta
       ListaTitulos *novoTitulo = (ListaTitulos *)malloc(sizeof(ListaTitulos));
+
+      if (novoTitulo == NULL)
+        exit(1);
+
       novoTitulo->titulo = strdup(titulo);
       novoTitulo->prox = atual->titulos;
       atual->titulos = novoTitulo;
@@ -188,9 +221,17 @@ void adicionarAresta(Sistema *s, int u, int v, const char *titulo) {
 
   // Se não existir, cria a aresta entre os pesquisadores
   Aresta *novaAresta = (Aresta *)malloc(sizeof(Aresta));
+
+  if (novaAresta == NULL)
+    exit(1);
+
   novaAresta->idDestino = v;
 
   ListaTitulos *novoTitulo = (ListaTitulos *)malloc(sizeof(ListaTitulos));
+
+  if (novoTitulo == NULL)
+    exit(1);
+
   novoTitulo->titulo = strdup(titulo);
   novoTitulo->prox = NULL;
 
@@ -200,7 +241,7 @@ void adicionarAresta(Sistema *s, int u, int v, const char *titulo) {
 }
 
 // Constrói o grafo iterando sobre todos os títulos e ligando seus co-autores
-void construirGrafo(Sistema *s) {
+void construirGrafo(contexto *s) {
   for (int i = 0; i < HASH_SIZE; i++) {
     HashTitulo *tituloAtual = s->tabelaTitulos[i];
     while (tituloAtual != NULL) {
@@ -225,16 +266,19 @@ void construirGrafo(Sistema *s) {
 }
 
 /* ============================================================================
- * OPERAÇÕES SOLICITADAS
+ * OPERAÇÕES
  * ============================================================================
  */
 
-// Operação 1: Dado um nome, listar os nomes dos seus colaboradores
-void listarColaboradores(Sistema *s, const char *nomeBusca) {
+// Operação 1:
+// Dado um nome, listar os nomes dos seus colaboradores (com quem ele está
+// conectado no grafo).
+void listarColaboradores(contexto *s, const char *nomeBusca) {
   unsigned int indice = calcularHash(nomeBusca);
   HashNome *atual = s->tabelaNomes[indice];
   int idPesquisador = -1;
 
+  // Resolve conflitos da tabela hash
   while (atual != NULL) {
     if (strcmp(atual->nome, nomeBusca) == 0) {
       idPesquisador = atual->id;
@@ -252,29 +296,26 @@ void listarColaboradores(Sistema *s, const char *nomeBusca) {
   Aresta *aresta = s->grafo[idPesquisador];
   if (aresta == NULL) {
     printf("Nenhum colaborador encontrado.\n");
+    return;
   }
 
   while (aresta != NULL) {
     printf("> %s\n", s->idParaNome[aresta->idDestino]);
 
-    // Opcional: Imprimir os trabalhos compartilhados
-    ListaTitulos *titulos = aresta->titulos;
-    while (titulos != NULL) {
-      printf("    - %s\n", titulos->titulo);
-      titulos = titulos->prox;
-    }
     aresta = aresta->prox;
   }
 }
 
-// Operação 2: Dado o título de um trabalho, listar os nomes de todos os autores
-void listarAutoresTrabalho(Sistema *s, const char *tituloBusca) {
+// Operação 2:
+// Dado o título de um trabalho, listar os nomes de todos os autores
+void listarAutoresTrabalho(contexto *s, const char *tituloBusca) {
   unsigned int indice = calcularHash(tituloBusca);
   HashTitulo *atual = s->tabelaTitulos[indice];
 
   while (atual != NULL) {
     if (strcmp(atual->titulo, tituloBusca) == 0) {
       printf("\n--- Autores de '%s' ---\n", tituloBusca);
+
       ListaAutores *autor = atual->autores;
       while (autor != NULL) {
         printf("> %s\n", s->idParaNome[autor->idAutor]);
@@ -287,18 +328,21 @@ void listarAutoresTrabalho(Sistema *s, const char *tituloBusca) {
   printf("\n[-] Trabalho '%s' nao encontrado.\n", tituloBusca);
 }
 
-// Operação 3: Calcular o maior grau de um vértice do grafo
-void calcularMaiorGrau(Sistema *s) {
-  int maiorGrau = 0;
+// Operação 3:
+// Calcular o maior grau de um vértice do grafo
+void calcularMaiorGrau(contexto *s) {
+  int maiorGrau = -1;
   int idMaiorGrau = -1;
 
   for (int i = 0; i < s->totalPesquisadores; i++) {
     int grauAtual = 0;
     Aresta *aresta = s->grafo[i];
+
     while (aresta != NULL) {
       grauAtual++;
       aresta = aresta->prox;
     }
+
     if (grauAtual > maiorGrau) {
       maiorGrau = grauAtual;
       idMaiorGrau = i;
@@ -308,20 +352,22 @@ void calcularMaiorGrau(Sistema *s) {
   if (idMaiorGrau != -1) {
     printf("\n--- Maior Grau do Grafo ---\n");
     printf("Pesquisador: %s\n", s->idParaNome[idMaiorGrau]);
-    printf("Grau (Numero de colaboradores): %d\n", maiorGrau);
+    printf("Grau: %d\n", maiorGrau);
   } else {
     printf("\n[-] O grafo esta vazio.\n");
   }
 }
 
-// Operação 4: Calcular o grau médio do grafo
-void calcularGrauMedio(Sistema *s) {
+// Operação 4:
+// Calcular o grau médio do grafo
+void calcularGrauMedio(contexto *s) {
   if (s->totalPesquisadores == 0) {
     printf("\n[-] O grafo esta vazio.\n");
     return;
   }
 
   int somaGraus = 0;
+
   for (int i = 0; i < s->totalPesquisadores; i++) {
     Aresta *aresta = s->grafo[i];
     while (aresta != NULL) {
@@ -332,17 +378,15 @@ void calcularGrauMedio(Sistema *s) {
 
   double grauMedio = (double)somaGraus / s->totalPesquisadores;
   printf("\n--- Grau Medio do Grafo ---\n");
-  printf("Total de Vértices: %d\n", s->totalPesquisadores);
-  printf("Total de Arestas Direcionadas: %d\n", somaGraus);
   printf("Grau Medio: %.2f\n", grauMedio);
 }
 
 /* ============================================================================
- * LEITURA DO ARQUIVO E PROGRAMA PRINCIPAL
+ * LEITURA DO ARQUIVO
  * ============================================================================
  */
 
-void carregarDados(Sistema *s, const char *nomeArquivo) {
+void carregarDados(contexto *s, const char *nomeArquivo) {
   FILE *file = fopen(nomeArquivo, "r");
   if (!file) {
     printf("Erro: Nao foi possivel abrir o arquivo '%s'.\n", nomeArquivo);
@@ -351,16 +395,22 @@ void carregarDados(Sistema *s, const char *nomeArquivo) {
 
   char linha[MAX_LINE];
   while (fgets(linha, sizeof(linha), file)) {
-    limparString(linha);
+    trim_str(linha);
+
     if (strlen(linha) == 0)
       continue;
 
     // Procura pelo separador '\t'
     char *tabPtr = strchr(linha, '\t');
+
     if (tabPtr != NULL) {
       *tabPtr = '\0'; // Separa a string em duas quebrando no tab
+
       char *nome = linha;
       char *titulo = tabPtr + 1;
+
+      // printf("Pesquisador: %s\n", nome);
+      // printf("Título: %s\n", titulo);
 
       // Insere nas Hashs
       int idAutor = obterOuInserirPesquisador(s, nome);
@@ -369,49 +419,54 @@ void carregarDados(Sistema *s, const char *nomeArquivo) {
   }
   fclose(file);
 
-  // Com os dados em memória, constrói as arestas do grafo
+  // Com os dados salvos no contexto, constrói as arestas do grafo
   construirGrafo(s);
 }
 
-int main() {
-  Sistema *s = criarSistema();
+/* ============================================================================
+ * MAIN
+ * ============================================================================
+ */
 
-  printf("Carregando dados de 'dadosPesquisadores.txt'...\n");
-  carregarDados(s, "dadosPesquisadores.txt");
-  printf("Dados carregados com sucesso! Grafo construido.\n");
+void print_header() {
+  printf("\n=========================================\n");
+  printf("           MENU DE COLABORACOES          \n");
+  printf("=========================================\n");
+  printf("1. Listar colaboradores de um pesquisador\n");
+  printf("2. Listar autores de um trabalho\n");
+  printf("3. Calcular maior grau de um vertice\n");
+  printf("4. Calcular grau medio do grafo\n");
+  printf("5. Sair\n");
+  printf("Escolha uma opcao: ");
+}
 
+void loop_options(contexto *s) {
   int opcao = 0;
   char buffer[MAX_LINE];
 
-  do {
-    printf("\n=========================================\n");
-    printf("           MENU DE COLABORACOES          \n");
-    printf("=========================================\n");
-    printf("1. Listar colaboradores de um pesquisador\n");
-    printf("2. Listar autores de um trabalho\n");
-    printf("3. Calcular maior grau de um vertice\n");
-    printf("4. Calcular grau medio do grafo\n");
-    printf("5. Sair\n");
-    printf("Escolha uma opcao: ");
+  while (opcao != 5) {
+    print_header();
 
-    if (scanf("%d", &opcao) != 1) {
-      while (getchar() != '\n')
-        ; // Limpa o buffer caso falhe a leitura
-      continue;
-    }
-    getchar(); // Limpa o \n restante
+    scanf("%d", &opcao);
+    getchar();
+
+    printf("\n");
 
     switch (opcao) {
     case 1:
       printf("Digite o nome do pesquisador: ");
+
       fgets(buffer, sizeof(buffer), stdin);
-      limparString(buffer);
+      trim_str(buffer);
+
       listarColaboradores(s, buffer);
       break;
     case 2:
       printf("Digite o titulo do trabalho: ");
+
       fgets(buffer, sizeof(buffer), stdin);
-      limparString(buffer);
+      trim_str(buffer);
+
       listarAutoresTrabalho(s, buffer);
       break;
     case 3:
@@ -421,16 +476,25 @@ int main() {
       calcularGrauMedio(s);
       break;
     case 5:
-      printf("Encerrando...\n");
-      break;
+      printf("Finalizando\n");
+      return;
     default:
-      printf("Opcao invalida!\n");
+      printf("Opção inválida!\n");
+      break;
     }
-  } while (opcao != 5);
 
-  // O Sistema Operacional irá recuperar a memória alocada ao final da execução.
-  // Em sistemas de longa duração é essencial fazer o Free de cada lista
-  // encadeada e tabela.
+    sleep(1);
+  }
+}
+
+int main() {
+  contexto *s = criar_contexto();
+
+  printf("Carregando dados\n");
+  carregarDados(s, "dadosPesquisadores.txt");
+  printf("Dados carregados com sucesso!\n");
+
+  loop_options(s);
 
   return 0;
 }
